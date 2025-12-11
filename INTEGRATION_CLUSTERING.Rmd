@@ -139,7 +139,7 @@ trophoblastsFINAL <- JoinLayers(trophoblastsFINAL)
 #Run FindAllMarkers
 all_markers_trophoblastsFINAL <- FindAllMarkers(trophoblastsFINAL, only.pos = TRUE)
 
-# Save markers to file
+# Table S2
 write.csv(all_markers_trophoblastsFINAL, 
           file = "~/FINAL/allmarkers_trophoblastsFINAL.csv", 
           quote = FALSE, 
