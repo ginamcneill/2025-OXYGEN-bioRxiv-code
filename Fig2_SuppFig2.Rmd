@@ -1,0 +1,178 @@
+---
+title: "Fig2_SuppFig2"
+output: html_document
+date: "2025-09-03"
+---
+```{r}
+library(monocle3)
+library(Seurat)
+library(SeuratWrappers)
+library(ggplot2)
+library(patchwork)
+library(tibble)
+library(ggbeeswarm)
+```
+
+```{r}
+#Figure 2A
+SCTp <- subset (organoids, idents = c("SCTp 1", "SCTp 2"))
+SCTp <- SetIdent(SCTp, value = SCTp@meta.data$OxygenCondition)
+Idents(SCTp) <- factor(Idents(SCTp),
+                            levels = c("20",  "8",  "3"))
+
+pdf("SCTSignature.pdf", width = 19, height = 3)
+DotPlot (SCTp,
+         features  = c("ERVW-1", "ERVFRD-1", "ERVV-1", "ERVV-2", "ERV3-1", "ERVH48-1", "ERVMER34-1", "SLC1A5", "MFSD2A", "CGA", "CGB1", "CGB2", "CGB5", "CGB7", "CGB8", "INSL4", "LEP", "HSD17B1", "PSG1", "PSG2", "PSG3", "PSG4", "PSG5", "PSG6", "PSG8", "PSG9", "PSG11", "SDC1", "GCM1"),
+         assay     = "RNA",
+         cols      = c("lightgrey", "red"),
+         col.min   = 0,
+         col.max   = 1,
+         dot.min   = 0,
+         dot.scale = 15)
+dev.off
+```
+
+
+```{r}
+#Figure 2B
+#Monocle3 Analysis on SCTLineage
+SCTlineage <- subset (organoids, idents = c("CTB 1", "CTB 2", "SCTp 1", "SCTp 2"))
+rm(organoids)
+SCT.monocle3 <- as.cell_data_set(SCTlineage, assay = "RNA")
+rm(SCTlineage)
+SCT.monocle3 <- estimate_size_factors (SCT.monocle3)
+SCT.monocle3 <- cluster_cells         (SCT.monocle3,
+                                       reduction_method = c("UMAP"),
+                                       cluster_method   = "leiden",
+                                       partition_qval   = 0.05,
+                                       resolution       = 0.00015)
+
+p1  <- plot_cells (SCT.monocle3,                               show_trajectory_graph = FALSE)
+p2  <- plot_cells (SCT.monocle3, color_cells_by = "partition", show_trajectory_graph = FALSE)
+wrap_plots        (p1, p2)
+SCT.monocle3 <- learn_graph (SCT.monocle3, use_partition = FALSE, close_loop = TRUE)
+
+get_earliest_principal_node <- function(SCT.monocle3, time_bin="1"){
+  cell_ids <- which(colData(SCT.monocle3)[, "Time"] == time_bin)
+  
+  closest_vertex <-
+  SCT.monocle3@principal_graph_aux[["UMAP"]]$pr_graph_cell_proj_closest_vertex
+  closest_vertex <- as.matrix(closest_vertex[colnames(SCT.monocle3), ])
+  root_pr_nodes <-
+  igraph::V(principal_graph(SCT.monocle3)[["UMAP"]])$name[as.numeric(names
+  (which.max(table(closest_vertex[cell_ids,]))))]
+  
+  root_pr_nodes
+}
+SCT.monocle3 <- order_cells(SCT.monocle3, root_pr_nodes=get_earliest_principal_node(SCT.monocle3))
+
+#Add pseudotime values back into Seurat object
+SCT.monocle3$monocle3_pseudotime <- pseudotime(SCT.monocle3)
+SCTlineage$pseudotime <- pseudotime(SCT.monocle3)
+
+#SCTLineage UMAP
+pdf         ("UMAP_SCTLineage.pdf", height = 5, width = 9)
+UMAPPlot(SCTlineage, label=FALSE, order= TRUE, pt.size = 1, 
+         cols    = c('CTB 1'  = '#00C19A',
+                      'CTB 2'  = '#999999',
+                      'SCTp 1'   = '#8C510A',
+                      'SCTp 2'    = '#FF7F00'))
+dev.off     ()
+
+#SCTLineage Monocle3 UMAP
+pdf         ("UMAP_Monocle3_SCT.pdf", height = 5, width = 9)
+plot_cells (SCT.monocle3,
+            color_cells_by = "pseudotime",
+            label_cell_groups             = FALSE,
+            label_leaves                  = FALSE,
+            label_branch_points           = FALSE,
+            graph_label_size              = 0,
+            cell_size                     = 1,
+            trajectory_graph_color        = "black",
+            trajectory_graph_segment_size = 1)
+dev.off     ()
+```
+
+```{r}
+#Figure 2C
+SCTlineage <- SetIdent(SCTlineage, value = SCTlineage@meta.data$OxygenCondition)
+SCT.monocle3 <- as.cell_data_set(SCTlineage, assay = "RNA")
+pt_df_sdz <- data.frame(
+  pseudotime = colData(SCT.monocle3)$pseudotime,
+  Condition = colData(SCT.monocle3)$OxygenCondition,
+  cell_type = colData(SCT.monocle3)$celltype
+)
+cell_type_colors <- c(
+  'CTB 1'  = '#00C19A',
+  'CTB 2'  = '#999999',
+  'SCTp 1'   = '#8C510A',
+  'SCTp 2'    = '#FF7F00')
+
+condition_colors <- c(
+  "20" = "darkorchid",
+  "3" = "aquamarine3",
+  "8" = "palegreen1")
+pdf         ("DensityPlot_SCT_3.pdf", height = 7, width = 10)
+ggplot(pt_df_sdz, aes(x = pseudotime, y = Condition)) +
+  geom_quasirandom(
+    aes(color = cell_type),
+    groupOnX = FALSE,
+    varwidth = FALSE,
+    size = 1,
+    alpha = 1
+  ) +
+  scale_color_manual(values = cell_type_colors) +
+  labs(x = NULL, y = "Condition", color = "Cell Type") +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "right",
+    panel.grid.major.y = element_blank(),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.title.y = element_text(angle = 90, vjust = 0.5),
+    axis.text.y = element_text(size = 10),
+    plot.margin = margin(0, 10, 0, 10)
+  )+ NoLegend()
+dev.off     ()
+
+pdf         ("DensityLineGraph_SCT.pdf", height = 7, width = 10)
+ggplot(pt_df_sdz, aes(x = pseudotime, color = Condition)) +
+  geom_density(size = 1.5) +
+  scale_color_manual(values = condition_colors) +
+  labs(x = "Pseudotime", y = "Density") +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "none",
+    plot.margin = margin(0, 10, 0, 10)
+  )
+dev.off     ()
+
+#Significance Testing
+kruskal.test(pseudotime ~ OxygenCondition, data = SCTlineage@meta.data)
+
+# Run pairwise Wilcoxon test
+pw <- pairwise.wilcox.test(
+  SCTlineage$pseudotime,
+  SCTlineage$OxygenCondition,
+  p.adjust.method = "BH"
+)
+```
+
+```{r}
+#Supplemental Figure 2A
+SCTlineage <- SetIdent(SCTlineage, value = SCTlineage@meta.data$celltype)
+
+pdf("SCTlineage_Celltype.pdf", width = 19, height = 3)
+DotPlot (SCTp,
+         features  = c("PAGE4","BCAM","TP63","TEAD4","ERVW-1", "ERVFRD-1", "ERVV-1", "ERVV-2", "ERV3-1", "ERVH48-1", "ERVMER34-1", "SLC1A5", "MFSD2A", "CGA", "CGB1", "CGB2", "CGB5", "CGB7", "CGB8", "INSL4", "LEP", "HSD17B1", "PSG1", "PSG2", "PSG3", "PSG4", "PSG5", "PSG6", "PSG8", "PSG9", "PSG11", "SDC1", "GCM1"),
+         assay     = "RNA",
+         cols      = c("lightgrey", "red"),
+         col.min   = 0,
+         col.max   = 1,
+         dot.min   = 0,
+         dot.scale = 15)
+dev.off
+```
+
+
+
