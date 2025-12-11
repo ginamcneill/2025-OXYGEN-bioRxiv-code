@@ -1,0 +1,261 @@
+---
+title: "Bulk - Two Oxgen Concentrations"
+author: "Giada Guntri"
+date: 2025-10-23
+date-format: iso
+format: 
+    html:
+        embed-resources: true
+        toc: true
+        toc-depth: 6
+---
+
+# Description
+
+This script will generate the following plots:
+
+\- figure 3 I
+
+\- Supplemental figure 3 f
+
+# Preparations
+
+## load libraries
+
+```{r message=FALSE}
+#| label: initialize
+library(edgeR) 
+library(PCAtools)
+library(sva)
+library(ComplexHeatmap)
+```
+
+## new folders
+
+```{r}
+#| label: folders
+plot_dir <- "Paper_Figures"
+if (!file.exists(plot_dir)) {
+    dir.create(plot_dir, showWarnings = FALSE, recursive = FALSE)
+}
+```
+
+## loading all the data
+
+```{r}
+#| label: data
+counts_all <- read.delim("3670Fa3851F_raw_counts.uniqueID.20251006.tab")
+
+rownames(counts_all) <- counts_all$uniqueID
+```
+
+## set up metadata
+
+```{r}
+#| label: metadata
+
+head(strsplit(colnames(counts_all)[6:length(colnames(counts_all))],"_"))
+sapply(strsplit(colnames(counts_all)[6:length(colnames(counts_all))],"_"), "[[", 1)
+sapply(strsplit(colnames(counts_all)[6:length(colnames(counts_all))],"_"), "[[", 2)
+sapply(strsplit(colnames(counts_all)[6:length(colnames(counts_all))],"_"), "[[", 3)
+
+sample <- colnames(counts_all)[6:length(colnames(counts_all))]
+donor_sample <- sapply(strsplit(colnames(counts_all)[6:length(colnames(counts_all))],"_"), "[[", 1)
+oxygen <- sapply(strsplit(colnames(counts_all)[6:length(colnames(counts_all))],"_"), "[[", 2)
+time_point <- sapply(strsplit(colnames(counts_all)[6:length(colnames(counts_all))],"_"), "[[", 3)
+
+#extra columns 
+
+donor <- gsub("X113", "X113_a", donor_sample)
+donor <- gsub("X113_ab", "X113_b", donor)
+
+original_donor = gsub("X113b", "X113", donor_sample)
+
+
+stage <- gsub("r1", "early", time_point)
+stage <- gsub("r4", "middle", stage)
+stage <- gsub("r6", "middle", stage)
+stage <- gsub("r7", "late", stage)
+stage <- gsub("r8", "late", stage)
+stage <- gsub("r9", "late", stage)
+
+round <- c(rep("a",5),rep("b",6),rep("b",6))
+
+metadata_all <- data.frame(sample = sample,
+                           original_donor = original_donor,
+                           donor = donor,
+                           oxygen =oxygen,
+                           time_point = time_point,
+                           stage = stage,
+                           round = round)
+
+rownames(metadata_all) <- metadata_all$sample
+    
+
+file_name_m <- "metadata.tab"
+write.table(metadata_all, file = file_name_m, sep = "\t", row.names = FALSE, quote = FALSE)
+
+```
+
+## Select time points of interest
+
+We select the 'middle' stage from round 'b'
+
+```{r}
+counts_selected <- counts_all[,c(1:5,13:14,19:20)]
+metadata_selected <-metadata_all[c(8:9,14:15),]
+
+# fix sample names for the selection
+colnames(counts_selected) <- gsub("X113b", "X113", colnames(counts_selected))
+metadata_selected$sample <- gsub("X113b", "X113", metadata_selected$sample)
+rownames(metadata_selected) <- metadata_selected$sample
+```
+
+# PCA and Heatmap
+
+## Batch correction by donor using ComBat-seq
+
+```{r}
+#| label: running ComBat-Seq
+
+counts_selected.CBSeq_byD <- ComBat_seq(as.matrix(counts_selected[,-c(1:5)]), batch=metadata_selected$donor, group=NULL)
+```
+
+## PCA
+
+Supplemental Fig 3 A
+
+PCA of batch corrected samples
+
+```{r}
+#| label: SFig 2 f
+
+# Define custom colors for the groups
+custom_colors <- c(
+  p21 = "#B49FDC",   # gold
+  p2  = "#66B2FC"     # grey
+)
+
+counts_sel.CBSeq_byD.log.cpm.pca <- pca(edgeR::cpm(counts_selected.CBSeq_byD, log=TRUE), 
+                              metadata = metadata_selected, removeVar = 0.1)
+
+
+# Create the biplot with custom colors
+PCA <- biplot(counts_sel.CBSeq_byD.log.cpm.pca,
+              colby = "oxygen",
+              colkey = custom_colors,
+              shape = "donor",
+              pointSize = 5,
+              legendPosition = 'right',
+              title = "PCA by Oxygen.",
+              encircle = FALSE,
+              lab = NULL) +
+              labs(fill = NULL)
+
+print(PCA)
+
+
+
+
+pdf(paste0(plot_dir, "/SFigure_2_f.pdf"), width = 6.88, height = 7)
+print(PCA)
+dev.off()
+```
+
+## Heatmap
+
+Fig 3 I
+
+Heatmap depicting batch corrected centered and scaled counts per million (cpm) of selected genes across two oxygen concentrations.
+
+### defining genes
+
+```{r}
+#| label: defining genes for heatmap
+VCTfusing <- c("ERVW-1", "ERVFRD-1")
+
+SCT <- c( "PSG4","CYP19A1", "MFSD2A", "GCM1", "CGB3", "KISS1", "SDC1", "CGB8")
+
+TO <- c("GATA2", "GATA3")
+
+vCT <- c("FBN2", "BCAM", "CDH1", "TP63", "MKI67", "WLS", "TEAD4")
+
+CCC <- c("TAGLN","CDH5", "SOX15", "ITGB6", "ITGA2", "NOTCH1")
+
+EVT <- c("PLAC8", "ITGA5", "HLA-G", "NOTUM", "ADAM12", "ITGA1")
+
+# Combine all into one ordered list
+genes1 <- c(VCTfusing, SCT, TO, vCT, CCC, EVT)
+
+# doublew check
+genes1
+genes1 %in% rownames(counts_selected)
+```
+
+### data to plot
+
+#### calculate cpm values
+
+```{r}
+all_counts_selected.bc.cpm <- cpm(counts_selected.CBSeq_byD, log=FALSE)
+
+data2plot1bc <- data.frame()
+
+for (gene in unique(genes1)) {
+    data2plot1bc <- rbind(data2plot1bc,
+                          all_counts_selected.bc.cpm[rownames(all_counts_selected.bc.cpm) == gene, ])
+}
+
+rownames(data2plot1bc) <- genes1
+colnames(data2plot1bc) <- colnames(all_counts_selected.bc.cpm)
+
+
+# Scale and center
+data2plot1bc.sc <- t(scale(t(data2plot1bc)))
+```
+
+#### assemble data in custom order
+
+```{r}
+# Custom order
+custom_order <- c(
+  grep("X113b_p21_r6", colnames(data2plot1bc.sc), value = TRUE),
+  grep("Y060_p21_r4", colnames(data2plot1bc.sc), value = TRUE),
+  grep("X113b_p2_r6", colnames(data2plot1bc.sc), value = TRUE),
+  grep("Y060_p2_r4", colnames(data2plot1bc.sc), value = TRUE)
+)
+
+# Reorder the columns in the data frame 
+data2plot1bc.sc <- data2plot1bc.sc[, custom_order]
+```
+
+### and plot
+
+```{r}
+#| label: Fig 2 h
+
+# Plot using ComplexHeatmap::pheatmap
+HM <- pheatmap(
+  data2plot1bc.sc,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  show_rownames = TRUE,
+  border_color = NA,
+  main = "Marker Expression",
+  name = "centred and scaled",
+  breaks = seq(-2, 2, length.out = 101)
+)
+
+print(HM)
+
+pdf(paste0(plot_dir, "/Figure_2_h.pdf"), height = 10, width = 12)
+    print(HM)
+
+dev.off()
+```
+
+## sessionInfo
+
+```{r}
+sessionInfo()
+```
